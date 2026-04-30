@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-180 0 461 100" width="461" height="100">
+  <defs>
+    <style type="text/css">
+      @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700&amp;display=swap');
+      .node-label {
+        font-family: 'Nunito', sans-serif;
+        font-weight: 700;
+        font-size: 14px;
+      }
+    </style>
+  </defs>
+
+  <!-- ============================================================
+       COLOR PALETTE
+       Outer ring (darkest):   #488674
+       Inner ring (mid tone):  #7ab86b
+       Center + border + text: #c3f53c
+       Box background:         #0f172a
+       Center stroke:          #ffffff
+  ============================================================ -->
+
+  <!-- Outer pulse ring -->
+  <circle cx="50" cy="50" r="10" fill="none" stroke="#488674" stroke-width="8" opacity="0">
+    <animate attributeName="r" values="10; 42" dur="2s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="0.6; 0" dur="2s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- Inner pulse ring -->
+  <circle cx="50" cy="50" r="10" fill="none" stroke="#7ab86b" stroke-width="6" opacity="0">
+    <animate attributeName="r" values="10; 28" dur="2s" begin="0.5s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="0.8; 0" dur="2s" begin="0.5s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- Center solid node -->
+  <circle cx="50" cy="50" r="9" fill="#c3f53c" stroke="#ffffff" stroke-width="3" />
+
+  <!-- Label box -->
+  <rect x="77" y="30" width="204" height="40" rx="6" fill="#0f172a" stroke="#c3f53c" stroke-width="2" />
+
+  <!-- Label text -->
+  <text x="179.0" y="50" text-anchor="middle" dominant-baseline="central"
+        class="node-label" fill="#c3f53c">HANDLEBAR CRASH PAD</text>
+</svg>
