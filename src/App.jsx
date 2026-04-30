@@ -42,6 +42,15 @@ const INITIAL_CONFIG = {
   },
 }
 
+const INITIAL_LIGHTING = {
+  envPreset: 'studio',     // 'studio' | 'city' | 'sunset' | 'dawn' | 'night' | 'warehouse' | 'forest' | 'apartment' | 'park' | 'lobby'
+  envIntensity: 0.6,       // overall HDRI brightness — try 0.3–0.8 for softer
+  keyIntensity: 0.6,       // main directional light — lower = softer shadows
+  keyPosition: [5, 10, 5], // direction the key light comes from
+  fillIntensity: 0.2,      // soft opposite-side light to lift shadows
+  background: '#1a1a1a',   // canvas background color
+}
+
 // ============================================================
 // HOTSPOT
 // ============================================================
@@ -262,7 +271,7 @@ function CameraRig({ config, selectedAccessory, tuneMode, editing, controlsRef }
 // MAIN APP
 // ============================================================
 
-function formatConfig(config) {
+function formatConfig(config, lighting) {
   const arr = (a) => `[${a.map((n) => +n.toFixed(2)).join(', ')}]`
   return `const INITIAL_CONFIG = {
   defaultCamera: { position: ${arr(config.defaultCamera.position)}, target: ${arr(config.defaultCamera.target)} },
@@ -276,12 +285,22 @@ function formatConfig(config) {
     explodedOffset: ${arr(config.handleBarPad.explodedOffset)},
     camera: { position: ${arr(config.handleBarPad.camera.position)}, target: ${arr(config.handleBarPad.camera.target)} },
   },
+}
+
+const INITIAL_LIGHTING = {
+  envPreset: '${lighting.envPreset}',
+  envIntensity: ${+lighting.envIntensity.toFixed(2)},
+  keyIntensity: ${+lighting.keyIntensity.toFixed(2)},
+  keyPosition: ${arr(lighting.keyPosition)},
+  fillIntensity: ${+lighting.fillIntensity.toFixed(2)},
+  background: '${lighting.background}',
 }`
 }
 
 export default function App() {
   const [selectedAccessory, setSelectedAccessory] = useState(null)
   const [config, setConfig] = useState(INITIAL_CONFIG)
+  const [lighting, setLighting] = useState(INITIAL_LIGHTING)
   const cameraRef = useRef()
 
   // configRef always holds the latest config — bypasses stale closure in leva button callbacks
@@ -289,6 +308,12 @@ export default function App() {
   useEffect(() => {
     configRef.current = config
   }, [config])
+
+  // Same pattern for lighting state
+  const lightingRef = useRef(lighting)
+  useEffect(() => {
+    lightingRef.current = lighting
+  }, [lighting])
 
   // Holds leva set() functions per accessory so we can push updated values
   // back into the slider display (capture buttons & gizmo drags don't auto-sync otherwise)
@@ -478,15 +503,63 @@ export default function App() {
   }))
   levaSetters.current.handleBarPad = setHandlebarLeva
 
-  // ---- LEVA: Export ----
+  // ---- LEVA: Lighting ----
+  useControls('Lighting', {
+    envPreset: {
+      value: INITIAL_LIGHTING.envPreset,
+      options: ['studio', 'city', 'sunset', 'dawn', 'night', 'warehouse', 'forest', 'apartment', 'park', 'lobby'],
+      label: 'environment',
+      onChange: (v) => setLighting((l) => ({ ...l, envPreset: v })),
+      transient: false,
+    },
+    envIntensity: {
+      value: INITIAL_LIGHTING.envIntensity,
+      min: 0,
+      max: 2,
+      step: 0.05,
+      label: 'env intensity',
+      onChange: (v) => setLighting((l) => ({ ...l, envIntensity: v })),
+      transient: false,
+    },
+    keyIntensity: {
+      value: INITIAL_LIGHTING.keyIntensity,
+      min: 0,
+      max: 3,
+      step: 0.05,
+      label: 'key light',
+      onChange: (v) => setLighting((l) => ({ ...l, keyIntensity: v })),
+      transient: false,
+    },
+    keyPosition: {
+      value: INITIAL_LIGHTING.keyPosition,
+      step: 0.5,
+      label: 'key position',
+      onChange: (v) => setLighting((l) => ({ ...l, keyPosition: v })),
+      transient: false,
+    },
+    fillIntensity: {
+      value: INITIAL_LIGHTING.fillIntensity,
+      min: 0,
+      max: 2,
+      step: 0.05,
+      label: 'fill light',
+      onChange: (v) => setLighting((l) => ({ ...l, fillIntensity: v })),
+      transient: false,
+    },
+    background: {
+      value: INITIAL_LIGHTING.background,
+      label: 'background',
+      onChange: (v) => setLighting((l) => ({ ...l, background: v })),
+      transient: false,
+    },
+  })
   useControls('Export', {
     'Copy Config to Clipboard': button(() => {
-      // Read from ref to get the latest config, not the stale closure value
-      const latest = configRef.current
-      console.log('📋 Copying config:', latest)
-      const code = formatConfig(latest)
+      // Read from refs to get the latest values, not stale closure values
+      const code = formatConfig(configRef.current, lightingRef.current)
+      console.log('📋 Copying config:', { config: configRef.current, lighting: lightingRef.current })
       navigator.clipboard.writeText(code).then(
-        () => alert('✅ Config copied! Paste it over the INITIAL_CONFIG block in App.jsx'),
+        () => alert('✅ Config copied! Paste it over the INITIAL_CONFIG and INITIAL_LIGHTING blocks in App.jsx'),
         () => {
           console.log(code)
           alert('Clipboard blocked — config logged to console instead')
@@ -525,7 +598,7 @@ export default function App() {
   }, [])
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#1a1a1a', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100vh', background: lighting.background, position: 'relative' }}>
       {!tuneMode && selectedAccessory && (
         <button
           onClick={() => setSelectedAccessory(null)}
@@ -575,10 +648,9 @@ export default function App() {
 
       <Canvas shadows>
         <Suspense fallback={null}>
-          <Environment preset="studio" />
-          <ambientLight intensity={0.4} />
-          <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
-          <directionalLight position={[-5, 5, -5]} intensity={0.4} />
+          <Environment preset={lighting.envPreset} environmentIntensity={lighting.envIntensity} />
+          <directionalLight position={lighting.keyPosition} intensity={lighting.keyIntensity} castShadow />
+          <directionalLight position={[-lighting.keyPosition[0], lighting.keyPosition[1] * 0.5, -lighting.keyPosition[2]]} intensity={lighting.fillIntensity} />
           <Model
             config={config}
             selectedAccessory={selectedAccessory}
