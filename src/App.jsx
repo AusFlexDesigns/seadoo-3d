@@ -70,7 +70,7 @@ function Hotspot({ position, onClick, visible, svgUrl }) {
           onMouseLeave={() => setHovered(false)}
           style={{
             cursor: 'pointer',
-            width: 240,
+            width: 120,
             userSelect: 'none',
             transform: hovered ? 'scale(1.1)' : 'scale(1)',
             transition: 'transform 0.2s ease',
