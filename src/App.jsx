@@ -29,7 +29,7 @@ const ACCESSORIES = {
 
 // Tune in the UI, then paste copied values back here when finalised
 const INITIAL_CONFIG = {
-  defaultCamera: { position: [0.74, 0.8, -2.15], target: [0, 0, 0] },
+  defaultCamera: { position: [0.74, 0.8, -2.15], target: [0, 0.2, 0] },
   speakerSystem: {
     hotspotPosition: [0, 0.7, -0.65],
     explodedOffset: [0, 0.1, 0.2],
@@ -70,7 +70,7 @@ function Hotspot({ position, onClick, visible, svgUrl }) {
           onMouseLeave={() => setHovered(false)}
           style={{
             cursor: 'pointer',
-            width: 120,
+            width: 100,
             userSelect: 'none',
             transform: hovered ? 'scale(1.1)' : 'scale(1)',
             transition: 'transform 0.2s ease',
@@ -195,16 +195,21 @@ function Model({ config, selectedAccessory, tuneMode, onHotspotClick }) {
 
 function CameraRig({ config, selectedAccessory, tuneMode, editing, controlsRef }) {
   // Disable right-click TRUCK in tune mode so the pivot stays locked while orbiting.
-  // Re-enable in production mode (default behaviour).
+  // In production mode, lock the camera to orbit-only — no pan, no zoom — so users
+  // always see the composed framings exactly as tuned.
   useEffect(() => {
     const cc = controlsRef.current
     if (!cc) return
     if (tuneMode) {
-      cc.mouseButtons.right = 0 // ACTION.NONE
+      cc.mouseButtons.right = 0 // ACTION.NONE — no truck (pivot locked)
+      cc.mouseButtons.wheel = 8 // ACTION.DOLLY — zoom OK while tuning
+      cc.mouseButtons.middle = 8 // ACTION.DOLLY
       cc.touches.two = 0
     } else {
-      cc.mouseButtons.right = 2 // ACTION.TRUCK
-      cc.touches.two = 64 // ACTION.TOUCH_TRUCK
+      cc.mouseButtons.right = 0 // disable right-click pan in production
+      cc.mouseButtons.wheel = 0 // disable wheel zoom
+      cc.mouseButtons.middle = 0 // disable middle-click zoom
+      cc.touches.two = 0 // disable two-finger pan/zoom on mobile
     }
   }, [tuneMode])
 
@@ -223,22 +228,32 @@ function CameraRig({ config, selectedAccessory, tuneMode, editing, controlsRef }
     }
   }, [selectedAccessory, tuneMode])
 
-  // TUNE mode: camera follows whichever accessory is being edited.
-  // Updates instantly when sliders or pivot gizmos change values.
-  const editingCam =
-    editing === 'default' ? config.defaultCamera : config[editing]?.camera
-  const camPos = editingCam?.position
-  const camTgt = editingCam?.target
-
+  // TUNE mode: when user switches the "preview camera" dropdown, fly to that
+  // accessory's saved view. Does NOT re-fly when config values change naturally
+  // (e.g. when the user is manually orbiting and we capture position),
+  // which prevents the camera from snapping back over manual movement.
   useEffect(() => {
-    if (!controlsRef.current || !tuneMode || !editingCam) return
-    controlsRef.current.setLookAt(...camPos, ...camTgt, false)
+    if (!controlsRef.current || !tuneMode) return
+    const target =
+      editing === 'default' ? config.defaultCamera : config[editing]?.camera
+    if (!target) return
+    controlsRef.current.setLookAt(...target.position, ...target.target, true)
+    // Intentionally only depends on `editing` and `tuneMode` — config changes
+    // from sliders/gizmos are handled by their own onChange handlers below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    camPos?.[0], camPos?.[1], camPos?.[2],
-    camTgt?.[0], camTgt?.[1], camTgt?.[2],
-    editing, tuneMode,
-  ])
+  }, [editing, tuneMode])
+
+  // Expose an imperative way for slider/gizmo handlers to push camera updates
+  // without going through the dependency chain that would cause snap-back.
+  useEffect(() => {
+    if (!controlsRef.current || !tuneMode) return
+    const handler = (e) => {
+      const { position, target } = e.detail
+      controlsRef.current.setLookAt(...position, ...target, false)
+    }
+    window.addEventListener('jetski:tune-set-camera', handler)
+    return () => window.removeEventListener('jetski:tune-set-camera', handler)
+  }, [tuneMode])
 
   return <CameraControls ref={controlsRef} makeDefault smoothTime={0.8} />
 }
@@ -264,7 +279,7 @@ function formatConfig(config) {
 }`
 }
 
-export default function JetskiViewer() {
+export default function App() {
   const [selectedAccessory, setSelectedAccessory] = useState(null)
   const [config, setConfig] = useState(INITIAL_CONFIG)
   const cameraRef = useRef()
@@ -279,6 +294,25 @@ export default function JetskiViewer() {
   // back into the slider display (capture buttons & gizmo drags don't auto-sync otherwise)
   const levaSetters = useRef({})
 
+  // Tracks which camera is currently being edited in tune mode (used by the helpers below).
+  // Mirrors the leva `editing` value via a ref so onChange handlers see the latest value.
+  const editingRef = useRef('default')
+
+  // When a camera-related slider/gizmo changes for the currently-edited target,
+  // imperatively move the camera so the user sees the change live — without
+  // creating a useEffect dependency that would snap-back during manual orbiting.
+  const dispatchCameraIfEditing = (target, partial) => {
+    if (editingRef.current !== target) return
+    const current =
+      target === 'default'
+        ? configRef.current.defaultCamera
+        : configRef.current[target].camera
+    const merged = { ...current, ...partial }
+    window.dispatchEvent(
+      new CustomEvent('jetski:tune-set-camera', { detail: merged })
+    )
+  }
+
   // ---- LEVA: Mode ----
   const { tuneMode } = useControls({
     tuneMode: { value: false, label: '🛠 Tune Mode' },
@@ -292,6 +326,11 @@ export default function JetskiViewer() {
       label: 'preview camera',
     },
   }))
+
+  // Mirror editing into a ref so imperative handlers can read it without re-binding
+  useEffect(() => {
+    editingRef.current = editing
+  }, [editing])
 
   useEffect(() => {
     if (tuneMode) setSelectedAccessory(null)
@@ -343,14 +382,20 @@ export default function JetskiViewer() {
     position: {
       value: INITIAL_CONFIG.defaultCamera.position,
       step: 0.1,
-      onChange: (v) => updateConfig('defaultCamera.position', v),
+      onChange: (v) => {
+        updateConfig('defaultCamera.position', v)
+        dispatchCameraIfEditing('default', { position: v })
+      },
       transient: false,
     },
     target: {
       value: INITIAL_CONFIG.defaultCamera.target,
       step: 0.1,
       label: 'target (pivot)',
-      onChange: (v) => updateConfig('defaultCamera.target', v),
+      onChange: (v) => {
+        updateConfig('defaultCamera.target', v)
+        dispatchCameraIfEditing('default', { target: v })
+      },
       transient: false,
     },
     'Capture Current View': button(() => captureCamera('default')),
@@ -375,14 +420,20 @@ export default function JetskiViewer() {
       value: INITIAL_CONFIG.speakerSystem.camera.position,
       step: 0.1,
       label: 'cam pos',
-      onChange: (v) => updateConfig('speakerSystem.camera.position', v),
+      onChange: (v) => {
+        updateConfig('speakerSystem.camera.position', v)
+        dispatchCameraIfEditing('speakerSystem', { position: v })
+      },
       transient: false,
     },
     cameraTarget: {
       value: INITIAL_CONFIG.speakerSystem.camera.target,
       step: 0.1,
       label: 'cam target (pivot)',
-      onChange: (v) => updateConfig('speakerSystem.camera.target', v),
+      onChange: (v) => {
+        updateConfig('speakerSystem.camera.target', v)
+        dispatchCameraIfEditing('speakerSystem', { target: v })
+      },
       transient: false,
     },
     'Capture Camera': button(() => captureCamera('speakerSystem')),
@@ -407,14 +458,20 @@ export default function JetskiViewer() {
       value: INITIAL_CONFIG.handleBarPad.camera.position,
       step: 0.1,
       label: 'cam pos',
-      onChange: (v) => updateConfig('handleBarPad.camera.position', v),
+      onChange: (v) => {
+        updateConfig('handleBarPad.camera.position', v)
+        dispatchCameraIfEditing('handleBarPad', { position: v })
+      },
       transient: false,
     },
     cameraTarget: {
       value: INITIAL_CONFIG.handleBarPad.camera.target,
       step: 0.1,
       label: 'cam target (pivot)',
-      onChange: (v) => updateConfig('handleBarPad.camera.target', v),
+      onChange: (v) => {
+        updateConfig('handleBarPad.camera.target', v)
+        dispatchCameraIfEditing('handleBarPad', { target: v })
+      },
       transient: false,
     },
     'Capture Camera': button(() => captureCamera('handleBarPad')),
@@ -549,6 +606,7 @@ export default function JetskiViewer() {
                 onChange={(v) => {
                   updateConfig('defaultCamera.target', v)
                   levaSetters.current.default?.({ target: v })
+                  dispatchCameraIfEditing('default', { target: v })
                 }}
               />
               {/* Per-accessory camera pivots (yellow) */}
@@ -560,6 +618,7 @@ export default function JetskiViewer() {
                   onChange={(v) => {
                     updateConfig(`${key}.camera.target`, v)
                     levaSetters.current[key]?.({ cameraTarget: v })
+                    dispatchCameraIfEditing(key, { target: v })
                   }}
                 />
               ))}
